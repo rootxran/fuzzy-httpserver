@@ -58,17 +58,25 @@ class FuzzyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return super().do_GET()
 
         # Step 4: No match — list available entries in that directory
-        self.send_response(200)
+        self.send_response(206) # for partial content because can't find the file but gives out the list of files
         self.send_header("Content-type", "text/plain")
+        self.send_header("Server-Reply", "No file matched, Sending file list")
         self.end_headers()
+        print(f"[!] No exact or fuzzy match for '{requested}'. Sending directory file list instead.")
 
         rel_path = "/" + "/".join(remaining_parts[:-1])
         self.wfile.write(f"[!] '{final_part}' not found in {rel_path or '/'}\n\n".encode())
-        self.wfile.write(f"[>] Available entries in {rel_path or '/'}:\n\n".encode())
+        
+        output = f"[>] Available entries in {rel_path or '/'}:\n\n".encode()
+        self.wfile.write(output)
+        print(output.decode().strip())
+        print()
 
         for f in sorted(entries):
             full_rel = os.path.join(rel_path, f).replace("\\", "/")
-            self.wfile.write(f"- {full_rel}\n".encode())
+            output = f"{full_rel}\n".encode()
+            self.wfile.write(output)
+            print(output.decode().strip())
 
 parser = argparse.ArgumentParser(description="Fuzzy HTTP File Server")
 parser.add_argument("-p", "--port", type=int, default=8000, help="Port to serve on (default: 8000)")
