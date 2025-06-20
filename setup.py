@@ -5,10 +5,10 @@ with open('README.md', 'r',encoding="utf-8") as fh:
 
 setup(
     name='fuzzy-httpserver',
-    version='1.1.1',
+    version='1.3.0',
     description='Fuzzy matching HTTP file server with autocomplete and fallback',
     author='PakCyberbot',
-    author_email='pakcyberbot@gmail.com',
+    author_email='pakcyberbot@pakcyberbot.com',
     url="https://github.com/PakCyberbot/fuzzy-httpserver",  
     project_urls={  
         "Source": "https://github.com/PakCyberbot/fuzzy-httpserver",
