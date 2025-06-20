@@ -7,11 +7,12 @@ A lightweight, zero-dependency Python HTTP file server with fuzzy filename match
 ## 🚀 Features
 
 - 🔍 Fuzzy and prefix-based filename matching
-- 📄 Shows available files when no match is found
-- 🧾 Text-based fallback listing (CLI-friendly)
-- ⚙️ Custom port and directory support
-- ✅ No external dependencies
-- 🐍 Pure Python 3
+- 🧾 Server-side logs directory contents if no file is matched
+- ⚙️ Supports custom port and directory configuration
+- ✅ No external dependencies — plug-and-play
+- 🐍 Written in pure Python 3
+- 📤 Supports POST data requests
+- 🎨 Colored server-side output for better readability
 
 ---
 
@@ -64,6 +65,18 @@ Basically the list of files on that server directory
 | ------------------- | ----------------------------------------- |
 | `-p`, `--port`      | Port to listen on (default: 8000)         |
 | `-d`, `--directory` | Directory to serve (default: current dir) |
+
+## 📨 POST Support
+
+You can now send raw data via HTTP POST, and it will be saved on the server as a file. The filename will be prefixed with `fuzzy_post_data_` followed by the requested name.
+
+### Example
+
+```bash
+curl --data @file.txt http://<ip>:8000/mydump.txt
+#OR
+curl --data "username=admin&password=1234" http://<ip>:8000/formdata.txt
+```
 
 ---
 
