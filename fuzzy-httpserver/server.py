@@ -54,29 +54,69 @@ class FuzzyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if matched:
             remaining_parts[-1] = matched[0]
             self.path = "/" + "/".join(remaining_parts)
-            print(f"[+] Fuzzy matched '{requested}' -> '{self.path}'")
+            print(f"\033[92m[+] Fuzzy matched '{requested}' -> '{self.path}'\033[0m")
             return super().do_GET()
 
-        # Step 4: No match — list available entries in that directory
-        self.send_response(206) # for partial content because can't find the file but gives out the list of files
+        # Step 4: No match — 404 response and list dirs on server side
+        self.send_response(404)
         self.send_header("Content-type", "text/plain")
-        self.send_header("Server-Reply", "No file matched, Sending file list")
+        self.send_header("Server-Reply", "No file matched.")
         self.end_headers()
-        print(f"[!] No exact or fuzzy match for '{requested}'. Sending directory file list instead.")
+        print(f"\033[91m[!] No exact or fuzzy match for '{requested}'.\033[0m")
 
         rel_path = "/" + "/".join(remaining_parts[:-1])
-        self.wfile.write(f"[!] '{final_part}' not found in {rel_path or '/'}\n\n".encode())
+        abs_dir = os.path.join(self.directory, *remaining_parts[:-1])
         
-        output = f"[>] Available entries in {rel_path or '/'}:\n\n".encode()
-        self.wfile.write(output)
-        print(output.decode().strip())
-        print()
+        print(f"\033[95m[>] Available entries in {rel_path or '/'}:\033[0m\n")
 
         for f in sorted(entries):
             full_rel = os.path.join(rel_path, f).replace("\\", "/")
-            output = f"{full_rel}\n".encode()
-            self.wfile.write(output)
-            print(output.decode().strip())
+            abs_path = os.path.join(abs_dir, f)
+            if os.path.isdir(abs_path):
+                print(f"\033[94m{full_rel} (D)\033[0m")
+            else:
+                print(full_rel)
+
+        print("\n") # for giving some gap in output
+
+    def do_POST(self):
+        requested = unquote(self.path.lstrip("/"))
+        path_parts = requested.split("/")
+        filename = path_parts[-1] or "default"
+
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+        except Exception as e:
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write(b"[!] Failed to read POST data.\n")
+            print(f"[!] Error reading POST data: {e}")
+            return
+
+        # Make sure the directory path exists
+        dir_path = os.path.join(os.getcwd(), *path_parts[:-1])
+        os.makedirs(dir_path, exist_ok=True)
+
+        # Create the filename
+        save_path = os.path.join(dir_path, f"fuzzy_post_data_{filename}")
+
+        try:
+            with open(save_path, "wb") as f:
+                f.write(post_data)
+        except Exception as e:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(b"[!] Failed to write POST data to file.\n")
+            print(f"[!] Error writing to file '{save_path}': {e}")
+            return
+
+        self.send_response(200)
+        self.end_headers()
+        message = f"[+] POST data saved to: {save_path}\n"
+        self.wfile.write(message.encode())
+        print(message.strip())
+
 
 parser = argparse.ArgumentParser(description="Fuzzy HTTP File Server")
 parser.add_argument("-p", "--port", type=int, default=8000, help="Port to serve on (default: 8000)")
@@ -86,5 +126,6 @@ args = parser.parse_args()
 os.chdir(args.directory)
 
 with socketserver.TCPServer(("", args.port), FuzzyHTTPRequestHandler) as httpd:
+    print("\033[93mFound a bug or have a feature request? Reach out to @PakCyberbot (https://pakcyberbot.com)\033[0m")
     print(f"[+] Serving '{args.directory}' on port {args.port}")
     httpd.serve_forever()
