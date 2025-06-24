@@ -185,7 +185,7 @@ def list_all_interfaces():
     
     # Display results in the requested format
     for interface_name, ip_address in interfaces:
-        if 'tun' in interface_name.startswith or 'eth' in interface_name:
+        if 'tun' in interface_name or 'eth' in interface_name:
             print(f"\033[35m{interface_name}: {ip_address}\033[0m")
 
     print("-" * 40)
