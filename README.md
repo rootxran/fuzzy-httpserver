@@ -13,6 +13,8 @@ A lightweight, zero-dependency Python HTTP file server with fuzzy filename match
 - 🐍 Written in pure Python 3
 - 📤 Supports POST data requests
 - 🎨 Colored server-side output for better readability
+- 🖵 Shows IP addresses of key network interfaces at startup
+- Shows the Size and MD5 Hash of Received File - Integrity Check
 
 ---
 
