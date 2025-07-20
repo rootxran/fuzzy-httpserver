@@ -18,6 +18,17 @@ A lightweight, zero-dependency Python HTTP file server with fuzzy filename match
 
 ---
 
+## New Features
+
+- **Files over directories**: Automatically prioritizes files over directories when searching
+- **Recursive search**: Searches through all subdirectories automatically
+- **Case-insensitive matching**: Works with any case variation
+- **Scoring system**: makes priority list based on number of matching characters
+- **Multi-step filtering**: `/filename/filter1/filter2/filter3`
+
+<img width="794" height="698" alt="image" src="https://github.com/user-attachments/assets/236c383f-50e2-4dee-9c10-dab1b6486591" />
+
+ 
 ## 📦 Installation
 
 Install via pip:
