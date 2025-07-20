@@ -8,6 +8,165 @@ import hashlib
 import re,subprocess
 
 class FuzzyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def find_file_recursively(self, base_path, target_filename):
+        """Recursively search for a file in all subdirectories"""
+        target_lower = target_filename.lower()
+        best_match = None
+        best_score = 0
+        best_path = None
+        
+        def calculate_score(query, candidate, is_file):
+            query_lower = query.lower()
+            candidate_lower = candidate.lower()
+            
+            # Base score from difflib
+            base_score = difflib.SequenceMatcher(None, query_lower, candidate_lower).ratio()
+            
+            # Bonus for files
+            file_bonus = 0.3 if is_file else 0
+            
+            # Bonus for exact extension match
+            extension_bonus = 0
+            if '.' in query and '.' in candidate:
+                query_ext = query.split('.')[-1].lower()
+                candidate_ext = candidate.split('.')[-1].lower()
+                if query_ext == candidate_ext:
+                    extension_bonus = 0.2
+            
+            # Bonus for prefix match
+            prefix_bonus = 0
+            if candidate_lower.startswith(query_lower):
+                prefix_bonus = 0.1
+            
+            # Bonus for exact name match (case-insensitive)
+            exact_bonus = 0
+            if query_lower == candidate_lower:
+                exact_bonus = 0.5
+            
+            return base_score + file_bonus + extension_bonus + prefix_bonus + exact_bonus
+        
+        for root, dirs, files in os.walk(base_path):
+            # Check files in current directory
+            for file in files:
+                score = calculate_score(target_filename, file, True)
+                if score > best_score and score >= 0.5:
+                    best_score = score
+                    best_match = file
+                    best_path = root
+        
+        return best_match, best_path, best_score
+
+    def smart_file_matcher(self, query, base_path, dir_preference=None):
+        """Smart file matching with path analysis and keyword prioritization"""
+        query_lower = query.lower()
+        matching_files = []
+        
+        # Keywords for prioritization (higher index = higher priority)
+        priority_keywords = ['64', 'x64', 'amd64', '32', 'x86', 'win32', 'win64']
+        
+        def calculate_path_score(file_path, query):
+            """Calculate score based on path analysis and keywords"""
+            score = 0
+            path_lower = file_path.lower()
+            query_lower = query.lower()
+            
+            # Base similarity score
+            score += difflib.SequenceMatcher(None, query_lower, path_lower).ratio() * 0.3
+            
+            # File name matching (without extension)
+            file_name = os.path.splitext(os.path.basename(file_path))[0].lower()
+            if file_name == query_lower:
+                score += 1.0  # Exact file name match
+            
+            # Extension matching
+            if '.' in query and '.' in file_path:
+                query_ext = query.split('.')[-1].lower()
+                file_ext = file_path.split('.')[-1].lower()
+                if query_ext == file_ext:
+                    score += 0.3
+            
+            # Directory preference scoring
+            if dir_preference:
+                dir_pref_lower = dir_preference.lower()
+                if dir_pref_lower in path_lower:
+                    score += 1.5  # Heavy bonus for directory preference
+                else:
+                    score -= 0.5  # Penalty for non-preferred directory
+            
+            # Query keyword analysis - this is the most important part
+            query_has_64 = '64' in query_lower
+            query_has_32 = '32' in query_lower
+            path_has_64 = any(kw in path_lower for kw in ['64', 'x64', 'amd64'])
+            path_has_32 = any(kw in path_lower for kw in ['32', 'x86', 'win32'])
+            
+            # If query has 64, heavily prioritize 64-bit paths
+            if query_has_64 and path_has_64:
+                score += 2.0
+            elif query_has_64 and path_has_32:
+                score -= 1.0  # Penalize 32-bit when 64 is requested
+            
+            # If query has 32, heavily prioritize 32-bit paths
+            if query_has_32 and path_has_32:
+                score += 2.0
+            elif query_has_32 and path_has_64:
+                score -= 1.0  # Penalize 64-bit when 32 is requested
+            
+            # Default preference: 64-bit over 32-bit (when no specific preference)
+            if not query_has_64 and not query_has_32:
+                if path_has_64:
+                    score += 0.5  # Bonus for 64-bit by default
+                elif path_has_32:
+                    score += 0.2  # Lower bonus for 32-bit
+            
+            # Path keyword analysis (secondary priority)
+            for i, keyword in enumerate(priority_keywords):
+                if keyword in path_lower:
+                    # Higher priority for keywords that appear later in the list
+                    keyword_score = (i + 1) / len(priority_keywords) * 0.2
+                    score += keyword_score
+            
+            # Query keyword matching in path
+            query_words = query_lower.split()
+            for word in query_words:
+                if word in path_lower:
+                    score += 0.1
+            
+            # Character-by-character analysis
+            char_matches = 0
+            query_chars = set(query_lower.replace('.', ''))
+            path_chars = set(path_lower.replace('.', '').replace('/', '').replace('\\', ''))
+            if query_chars:
+                char_matches = len(query_chars.intersection(path_chars)) / len(query_chars)
+            score += char_matches * 0.1
+            
+            return score
+        
+        # Search recursively for files
+        for root, dirs, files in os.walk(base_path):
+            for file in files:
+                # Check if file name (without extension) matches query
+                file_name = os.path.splitext(file)[0].lower()
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, base_path).replace('\\', '/')
+                
+                # Check for exact file name match
+                if file_name == query_lower:
+                    score = calculate_path_score(rel_path, query)
+                    matching_files.append((rel_path, score, file))
+                # Check for partial matches - more flexible matching
+                elif (file_name.startswith(query_lower) or  # file starts with query
+                      query_lower.startswith(file_name) or  # query starts with file
+                      query_lower in file_name or           # query is contained in file
+                      file_name in query_lower):            # file is contained in query
+                    score = calculate_path_score(rel_path, query)
+                    if score >= 0.3:  # Lower threshold for partial matches
+                        matching_files.append((rel_path, score, file))
+        
+        # Sort by score (highest first)
+        matching_files.sort(key=lambda x: x[1], reverse=True)
+        
+        return matching_files
+
     def do_GET(self):
         requested = unquote(self.path.lstrip("/"))
         full_base = os.getcwd()
@@ -15,70 +174,200 @@ class FuzzyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         base_path = full_base
         remaining_parts = path_parts.copy()
 
-        # Step 1: Resolve intermediate fuzzy directories (case-insensitive)
-        for i, part in enumerate(path_parts[:-1]):
-            dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
-            mapping = {d.lower(): d for d in dirs}
-            match = difflib.get_close_matches(part.lower(), mapping.keys(), n=1, cutoff=0.5)
-            if match:
-                real = mapping[match[0]]
-                base_path = os.path.join(base_path, real)
-                remaining_parts[i] = real
-            else:
-                break  # can't go deeper
+        # Step 1: Parse the URL to extract filename and filter chain
+        filename = None
+        filter_chain = []
+        
+        if len(path_parts) == 1:
+            # Single part: /mimi
+            filename = path_parts[0]
+        elif len(path_parts) >= 2:
+            # Multiple parts: /mimi/64/exe
+            filename = path_parts[0]
+            filter_chain = path_parts[1:]  # All parts after filename are filters
 
-        # Step 2: Handle final part (file or dir)
-        final_part = path_parts[-1]
         try:
             entries = os.listdir(base_path)
         except Exception:
             entries = []
 
-        mapping = {e.lower(): e for e in entries}
-        full_target = os.path.join(base_path, mapping.get(final_part.lower(), final_part))
+        # Separate files and directories
+        files = []
+        dirs = []
+        for entry in entries:
+            full_path = os.path.join(base_path, entry)
+            if os.path.isfile(full_path):
+                files.append(entry)
+            else:
+                dirs.append(entry)
 
-        if os.path.exists(full_target):
-            remaining_parts[-1] = mapping.get(final_part.lower(), final_part)
-            self.path = "/" + "/".join(remaining_parts)
-            print(f"\033[94m[+] Exactly matched the file name '{requested.split('/')[-1]}' -> '{self.path}'	\033[0m")
+        # Step 2: Use smart file matcher to find initial files
+        matching_files = self.smart_file_matcher(filename, full_base)
+        
+        if matching_files:
+            # Apply progressive filtering
+            current_results = matching_files
+            
+            for filter_keyword in filter_chain:
+                filtered_results = []
+                filter_lower = filter_keyword.lower()
+                
+                for rel_path, score, file_name in current_results:
+                    if filter_lower in rel_path.lower():
+                        # Boost score for filter match
+                        filtered_score = score + 1.0
+                        filtered_results.append((rel_path, filtered_score, file_name))
+                
+                current_results = filtered_results
+                
+                # If no results after filtering, break
+                if not current_results:
+                    break
+            
+            # Use the final filtered results
+            matching_files = current_results
+            matching_files.sort(key=lambda x: x[1], reverse=True)
+            
+            # If multiple files found, show options
+            if len(matching_files) > 1:
+                self.send_response(300)  # Multiple choices
+                self.send_header("Content-type", "text/plain")
+                
+                if filter_chain:
+                    filter_str = "/".join(filter_chain)
+                    self.send_header("Server-Reply", f"Multiple files found matching '{filename}' with filters '{filter_str}'. Choose one:")
+                else:
+                    self.send_header("Server-Reply", f"Multiple files found matching '{filename}'. Choose one:")
+                self.end_headers()
+                
+                if filter_chain:
+                    filter_str = "/".join(filter_chain)
+                    print(f"\033[93m[?] Multiple files found matching '{filename}' with filters '{filter_str}':\033[0m")
+                else:
+                    print(f"\033[93m[?] Multiple files found matching '{filename}':\033[0m")
+                for i, (rel_path, score, file_name) in enumerate(matching_files, 1):
+                    full_path = f"/{rel_path}"
+                    self.wfile.write(f"{i}. {full_path} (score: {score:.2f})\n".encode())
+                    print(f"\033[94m  {i}. {full_path} (score: {score:.2f})\033[0m")
+                
+                print()  # Empty line for spacing
+                return
+            
+            # If exactly one file found, serve it
+            elif len(matching_files) == 1:
+                rel_path, score, file_name = matching_files[0]
+                self.path = f"/{rel_path}"
+                if filter_chain:
+                    filter_str = "/".join(filter_chain)
+                    print(f"\033[94m[+] Smart matched '{filename}' with filters '{filter_str}' -> '{self.path}' (score: {score:.2f})\033[0m")
+                else:
+                    print(f"\033[94m[+] Smart matched '{filename}' -> '{self.path}' (score: {score:.2f})\033[0m")
+                return super().do_GET()
+            
+            # If no files found after filtering
+            elif len(matching_files) == 0:
+                self.send_response(404)
+                self.send_header("Content-type", "text/plain")
+                if filter_chain:
+                    filter_str = "/".join(filter_chain)
+                    self.send_header("Server-Reply", f"No files found matching '{filename}' with filters '{filter_str}'.")
+                else:
+                    self.send_header("Server-Reply", f"No files found matching '{filename}'.")
+                self.end_headers()
+                if filter_chain:
+                    filter_str = "/".join(filter_chain)
+                    print(f"\033[91m[!] No files found matching '{filename}' with filters '{filter_str}'.\033[0m")
+                else:
+                    print(f"\033[91m[!] No files found matching '{filename}'.\033[0m")
+                return
+
+        # Step 3: Fallback to exact file match in current directory
+        file_mapping = {f.lower(): f for f in files}
+        if filename.lower() in file_mapping:
+            self.path = "/" + file_mapping[filename.lower()]
+            print(f"\033[94m[+] Exactly matched the file '{filename}' -> '{self.path}'\033[0m")
             return super().do_GET()
 
-        # Step 3: Try fuzzy match on final part
-        matched = []
-        candidates = list(mapping.keys())
-        prefix_matches = [k for k in candidates if k.startswith(final_part.lower())]
-        if prefix_matches:
-            matched = [mapping[prefix_matches[0]]]
-        else:
-            fuzzy = difflib.get_close_matches(final_part.lower(), candidates, n=1, cutoff=0.5)
-            if fuzzy:
-                matched = [mapping[fuzzy[0]]]
-
-        if matched:
-            remaining_parts[-1] = matched[0]
-            self.path = "/" + "/".join(remaining_parts)
-            print(f"\033[92m[+] Fuzzy matched '{requested}' -> '{self.path}'\033[0m")
+        # Step 4: Fallback to exact directory match
+        dir_mapping = {d.lower(): d for d in dirs}
+        if filename.lower() in dir_mapping:
+            self.path = "/" + dir_mapping[filename.lower()]
+            print(f"\033[94m[+] Exactly matched the directory '{filename}' -> '{self.path}'\033[0m")
             return super().do_GET()
 
-        # Step 4: No match — 404 response and list dirs on server side
+        # Step 5: Fallback to fuzzy matching
+        best_match = None
+        best_score = 0
+        best_type = None
+
+        # Score function that prioritizes files and exact extensions
+        def calculate_score(query, candidate, is_file):
+            query_lower = query.lower()
+            candidate_lower = candidate.lower()
+            
+            # Base score from difflib
+            base_score = difflib.SequenceMatcher(None, query_lower, candidate_lower).ratio()
+            
+            # Bonus for files
+            file_bonus = 0.3 if is_file else 0
+            
+            # Bonus for exact extension match
+            extension_bonus = 0
+            if '.' in query and '.' in candidate:
+                query_ext = query.split('.')[-1].lower()
+                candidate_ext = candidate.split('.')[-1].lower()
+                if query_ext == candidate_ext:
+                    extension_bonus = 0.2
+            
+            # Bonus for prefix match
+            prefix_bonus = 0
+            if candidate_lower.startswith(query_lower):
+                prefix_bonus = 0.1
+            
+            # Bonus for exact name match (case-insensitive)
+            exact_bonus = 0
+            if query_lower == candidate_lower:
+                exact_bonus = 0.5
+            
+            return base_score + file_bonus + extension_bonus + prefix_bonus + exact_bonus
+
+        # Check files first (higher priority)
+        for file in files:
+            score = calculate_score(filename, file, True)
+            if score > best_score and score >= 0.5:
+                best_score = score
+                best_match = file
+                best_type = "file"
+
+        # Then check directories (lower priority)
+        for dir_name in dirs:
+            score = calculate_score(filename, dir_name, False)
+            if score > best_score and score >= 0.5:
+                best_score = score
+                best_match = dir_name
+                best_type = "directory"
+
+        if best_match:
+            self.path = "/" + best_match
+            type_str = "file" if best_type == "file" else "directory"
+            print(f"\033[92m[+] Fuzzy matched '{filename}' -> '{self.path}' ({type_str}, score: {best_score:.2f})\033[0m")
+            return super().do_GET()
+
+        # Step 6: No match — 404 response and list files/dirs on server side
         self.send_response(404)
         self.send_header("Content-type", "text/plain")
         self.send_header("Server-Reply", "No file matched.")
         self.end_headers()
-        print(f"\033[91m[!] No exact or fuzzy match for '{requested}'.\033[0m")
+        print(f"\033[91m[!] No exact or fuzzy match for '{filename}'.\033[0m")
 
-        rel_path = "/" + "/".join(remaining_parts[:-1])
-        abs_dir = os.path.join(self.directory, *remaining_parts[:-1])
+        print(f"\033[95m[>] Available entries in /:\033[0m\n")
+
+        # Show files first, then directories
+        for f in sorted(files):
+            print(f"\033[93m/{f} (F)\033[0m")
         
-        print(f"\033[95m[>] Available entries in {rel_path or '/'}:\033[0m\n")
-
-        for f in sorted(entries):
-            full_rel = os.path.join(rel_path, f).replace("\\", "/")
-            abs_path = os.path.join(abs_dir, f)
-            if os.path.isdir(abs_path):
-                print(f"\033[94m{full_rel} (D)\033[0m")
-            else:
-                print(full_rel)
+        for f in sorted(dirs):
+            print(f"\033[94m/{f} (D)\033[0m")
 
         print("\n") # for giving some gap in output
 
@@ -200,9 +489,9 @@ os.chdir(args.directory)
 
 
 with socketserver.TCPServer(("", args.port), FuzzyHTTPRequestHandler) as httpd:
-    print("\033[93mFound a bug or have a feature request? Reach out to @PakCyberbot (https://pakcyberbot.com)\033[0m")
     print(f"[+] Serving '{args.directory}' on port {args.port}")
     print()
     list_all_interfaces()
     print()
     httpd.serve_forever()
+
