@@ -24,7 +24,7 @@ A lightweight, zero-dependency Python HTTP file server with fuzzy filename match
 - **Recursive search**: Searches through all subdirectories automatically
 - **Case-insensitive matching**: Works with any case variation
 - **Scoring system**: makes priority list based on number of matching characters
-- **Multi-step filtering**: `/filename/filter1/filter2/filter3`
+- **Multi-step filtering**: `/filename/filter1/filter2/filter3/filter[n]`
 
 <img width="794" height="698" alt="image" src="https://github.com/user-attachments/assets/236c383f-50e2-4dee-9c10-dab1b6486591" />
 
